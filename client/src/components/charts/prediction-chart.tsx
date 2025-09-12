@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PredictionResult } from "@/types/analytics";
 
 interface PredictionChartProps {
@@ -7,16 +7,29 @@ interface PredictionChartProps {
 
 export default function PredictionChart({ predictionResult }: PredictionChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<any>(null);
+  const chartInstanceRef = useRef<any>(null);
+  const [isChartLoaded, setIsChartLoaded] = useState(false);
 
   useEffect(() => {
-    if (canvasRef.current && predictionResult) {
-      import("chart.js/auto").then((Chart) => {
-        const ctx = canvasRef.current!.getContext('2d')!;
+    let mounted = true;
+
+    async function initChart() {
+      if (!canvasRef.current || !predictionResult) return;
+
+      try {
+        // Dynamic import of Chart.js
+        const Chart = (await import("chart.js/auto")).default;
         
-        // Destroy existing chart
-        if (chartRef.current) {
-          chartRef.current.destroy();
+        if (!mounted) return;
+
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Destroy existing chart instance
+        if (chartInstanceRef.current) {
+          chartInstanceRef.current.destroy();
+          chartInstanceRef.current = null;
         }
 
         // Generate mock weekly progression for visualization
@@ -37,7 +50,8 @@ export default function PredictionChart({ predictionResult }: PredictionChartPro
           return predictionResult.confidence_lower * (0.7 + progress * 0.3);
         });
         
-        chartRef.current = new Chart.default(ctx, {
+        // Create chart instance
+        chartInstanceRef.current = new Chart(ctx, {
           type: 'line',
           data: {
             labels: weeks,
@@ -75,6 +89,10 @@ export default function PredictionChart({ predictionResult }: PredictionChartPro
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: {
+              duration: 750,
+              easing: 'easeInOutCubic'
+            },
             plugins: {
               legend: {
                 labels: { 
@@ -85,7 +103,8 @@ export default function PredictionChart({ predictionResult }: PredictionChartPro
               tooltip: {
                 callbacks: {
                   label: function(context) {
-                    return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}%`;
+                    const unit = predictionResult.target_metric === 'AOV' ? '円' : '%';
+                    return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}${unit}`;
                   }
                 }
               }
@@ -97,11 +116,16 @@ export default function PredictionChart({ predictionResult }: PredictionChartPro
                 grid: { color: 'hsl(215, 27.9%, 16.9%)' }
               },
               y: { 
-                title: { display: true, text: `${predictionResult.target_metric} (%)`, color: 'hsl(213, 31%, 91%)' },
+                title: { 
+                  display: true, 
+                  text: predictionResult.target_metric === 'AOV' ? `${predictionResult.target_metric} (円)` : `${predictionResult.target_metric} (%)`, 
+                  color: 'hsl(213, 31%, 91%)' 
+                },
                 ticks: { 
                   color: 'hsl(217.9, 10.6%, 64.9%)',
                   callback: function(value) {
-                    return value + '%';
+                    const unit = predictionResult.target_metric === 'AOV' ? '円' : '%';
+                    return value + unit;
                   }
                 },
                 grid: { color: 'hsl(215, 27.9%, 16.9%)' }
@@ -113,15 +137,42 @@ export default function PredictionChart({ predictionResult }: PredictionChartPro
             }
           }
         });
-      });
+
+        if (mounted) {
+          setIsChartLoaded(true);
+        }
+      } catch (error) {
+        console.error('Failed to initialize prediction chart:', error);
+        setIsChartLoaded(false);
+      }
     }
 
+    initChart();
+
     return () => {
-      if (chartRef.current) {
-        chartRef.current.destroy();
+      mounted = false;
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy();
+        chartInstanceRef.current = null;
       }
     };
   }, [predictionResult]);
 
-  return <canvas ref={canvasRef} className="w-full h-64" data-testid="prediction-chart" />;
+  return (
+    <div className="relative w-full h-64">
+      <canvas 
+        ref={canvasRef} 
+        className="w-full h-full" 
+        data-testid="prediction-chart"
+      />
+      {!isChartLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-card/50 backdrop-blur-sm rounded-lg">
+          <div className="flex items-center space-x-2 text-muted-foreground">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+            <span className="text-sm">予測チャートを読み込み中...</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
