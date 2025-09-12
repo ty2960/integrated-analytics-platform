@@ -317,7 +317,16 @@ export default function PAPrediction({
             </div>
 
             {/* Prediction Chart */}
-            <PredictionChart predictionResult={predictionResult} />
+            {predictionResult && (
+              <div>
+                <PredictionChart predictionResult={predictionResult} />
+                {useAdvancedModel && advancedPrediction && (
+                  <div className="mt-2 text-xs text-muted-foreground text-center">
+                    ※ グラフは簡易モデルの推移を表示しています
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Key Drivers */}
             <div className="mt-6">
