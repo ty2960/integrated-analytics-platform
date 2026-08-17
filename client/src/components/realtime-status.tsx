@@ -16,6 +16,16 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  getRealtimeAuthorizationHeaders,
+  getRealtimeWebSocketUrl,
+} from "@/lib/realtime-auth";
+
+interface ExternalApiStatus {
+  source: string;
+  status: string;
+  last_ping: string;
+}
 
 // Create a simple realtime client interface
 class SimpleRealtimeClient {
@@ -26,7 +36,12 @@ class SimpleRealtimeClient {
 
   connect() {
     try {
-      const wsUrl = `${window.location.origin.replace(/^http/, 'ws')}/realtime`;
+      const wsUrl = getRealtimeWebSocketUrl();
+      if (!wsUrl) {
+        console.error('VITE_REALTIME_API_TOKEN is required for realtime connections');
+        this.notifyConnectionChange(false);
+        return;
+      }
       
       this.ws = new WebSocket(wsUrl);
       
@@ -78,7 +93,10 @@ class SimpleRealtimeClient {
 
   async triggerManualSync(): Promise<boolean> {
     try {
-      const response = await fetch('/api/external/sync', { method: 'POST' });
+      const response = await fetch('/api/external/sync', {
+        method: 'POST',
+        headers: getRealtimeAuthorizationHeaders(),
+      });
       return response.ok;
     } catch (error) {
       console.error('Manual sync failed:', error);
@@ -356,7 +374,7 @@ export default function RealtimeStatus() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {connectionStatus.external_apis.map((api, index) => (
+            {connectionStatus.external_apis.map((api: ExternalApiStatus, index: number) => (
               <div 
                 key={index}
                 className="flex items-center justify-between p-3 bg-card border border-border rounded-lg"
