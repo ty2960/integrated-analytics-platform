@@ -1,5 +1,7 @@
 // Real-time data client for WebSocket connections and external API integrations
 
+import { getRealtimeWebSocketUrl } from "./realtime-auth";
+
 interface RealtimeMessage {
   type: 'connection' | 'data_update' | 'subscription_confirmed' | 'error' | 'pong' | 'subscribe' | 'unsubscribe' | 'ping';
   channel?: string;
@@ -50,11 +52,15 @@ export class RealtimeClient {
 
   private connect() {
     try {
-      // Use wss:// for HTTPS, ws:// for HTTP
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/realtime`;
+      const wsUrl = getRealtimeWebSocketUrl();
+      if (!wsUrl) {
+        console.error('VITE_REALTIME_API_TOKEN is required for realtime connections');
+        this.notifyConnectionListeners(false);
+        return;
+      }
       
-      console.log('Connecting to WebSocket:', wsUrl);
+      // Do not log wsUrl because its query string contains the access token.
+      console.log('Connecting to realtime WebSocket');
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

@@ -1,15 +1,56 @@
-import type { Express } from "express";
+import { timingSafeEqual } from "crypto";
+import type { Express, NextFunction, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { RealtimeDataManager } from "./realtime-data-manager";
 
+const SOURCE_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function getBearerToken(authorization: string | undefined): string | undefined {
+  const match = authorization?.match(/^Bearer (.+)$/i);
+  return match?.[1];
+}
+
+function tokenIsValid(candidate: string | undefined): boolean {
+  const expected = process.env.REALTIME_API_TOKEN;
+  if (!expected || !candidate) return false;
+
+  const candidateBuffer = Buffer.from(candidate);
+  const expectedBuffer = Buffer.from(expected);
+  return candidateBuffer.length === expectedBuffer.length
+    && timingSafeEqual(candidateBuffer, expectedBuffer);
+}
+
+function requireRealtimeToken(req: Request, res: Response, next: NextFunction) {
+  if (!process.env.REALTIME_API_TOKEN) {
+    return res.status(503).json({ error: "Realtime integrations are not configured" });
+  }
+  if (!tokenIsValid(getBearerToken(req.get("authorization")))) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+function isValidSource(source: unknown): source is string {
+  return typeof source === "string" && SOURCE_PATTERN.test(source);
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // External API integration routes
-  app.post('/api/external/webhook', (req, res) => {
+  app.post('/api/external/webhook', requireRealtimeToken, (req, res) => {
     try {
       // Handle external data webhooks
-      const { source, data, timestamp } = req.body;
+      const { source, data, timestamp } = req.body ?? {};
+      if (!isValidSource(source)
+        || !data
+        || typeof data !== "object"
+        || Array.isArray(data)
+        || Object.keys(data).length === 0
+        || typeof timestamp !== "string"
+        || Number.isNaN(Date.parse(timestamp))) {
+        return res.status(400).json({ error: "Invalid webhook payload" });
+      }
       realtimeManager.processWebhookData(source, data, timestamp);
       res.json({ success: true });
     } catch (error) {
@@ -17,10 +58,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/external/sync', async (req, res) => {
+  app.post('/api/external/sync', requireRealtimeToken, async (req, res) => {
     try {
       // Manual data sync trigger
-      const { source } = req.body;
+      const { source } = req.body ?? {};
+      if (source !== undefined && !isValidSource(source)) {
+        return res.status(400).json({ error: "Invalid sync source" });
+      }
       await realtimeManager.triggerSync(source);
       res.json({ success: true, message: 'Sync initiated' });
     } catch (error) {
@@ -43,9 +87,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // Setup WebSocket server for real-time updates on specific path
-  const wss = new WebSocketServer({ 
+  const wss = new WebSocketServer({
     server: httpServer,
-    path: '/realtime'
+    path: '/realtime',
+    maxPayload: 16 * 1024,
+    verifyClient: ({ req }, done) => {
+      const requestUrl = new URL(req.url || "/realtime", "http://localhost");
+      const authorization = typeof req.headers.authorization === "string"
+        ? req.headers.authorization
+        : undefined;
+      const token = getBearerToken(authorization) || requestUrl.searchParams.get("token") || undefined;
+      done(tokenIsValid(token), 401, "Unauthorized");
+    },
   });
   const realtimeManager = new RealtimeDataManager(wss);
 
