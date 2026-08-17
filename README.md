@@ -28,6 +28,12 @@ npm install
 npm run dev
 ```
 
+外部連携 API とリアルタイム WebSocket を有効にするには、十分に長いランダムな
+`REALTIME_API_TOKEN` をサーバー環境に設定してください。外部連携 API のクライアントは
+`Authorization: Bearer <token>` ヘッダーを送信する必要があります。WebSocket クライアントは
+同じ Bearer ヘッダー、またはブラウザでは `/realtime?token=<token>` を使用できます。
+トークンが未設定の場合、これらの外部連携機能はフェイルクローズします。
+
 ## プロジェクト構造
 
 - `client/` - React フロントエンドアプリケーション
